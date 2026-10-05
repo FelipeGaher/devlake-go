@@ -87,3 +87,28 @@ func TestValidator(t *testing.T) {
 		t.Errorf("route not in spec should pass through: %d", c)
 	}
 }
+
+func TestValidator_RejectUnknownRoutes(t *testing.T) {
+	mw, err := Validator([]byte(spec), Options{RejectUnknownRoutes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) }))
+	run := func(method, path string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(method, "http://api.test"+path, nil))
+		return rec
+	}
+	rec := run("GET", "/api/v1/secret-admin")
+	var body httpx.ErrorResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != 404 || body.Error != CodeNotFound {
+		t.Errorf("unknown path: %d %+v", rec.Code, body)
+	}
+	if c := run("DELETE", "/api/v1/items").Code; c != 404 {
+		t.Errorf("known path, unknown method: %d, want 404", c)
+	}
+	if c := run("GET", "/api/v1/items/abc").Code; c != 299 {
+		t.Errorf("known route: %d, want pass-through", c)
+	}
+}

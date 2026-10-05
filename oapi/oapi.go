@@ -28,10 +28,20 @@ type Options struct {
 	// rejects) mismatches — useful in integration tests to catch drift
 	// between Go types and the spec. Leave off in production.
 	ValidateResponses bool
-	// ErrorWriter writes the 400 response. Optional (default httpx.WriteError
-	// with code INVALID_REQUEST).
+	// RejectUnknownRoutes makes the spec a strict allow-list: a request that
+	// matches no path+method in the spec gets 404 (code NOT_FOUND) instead of
+	// passing through, so a handler registered on the router but missing
+	// from the spec can never be reached unvalidated. Mount anything that is
+	// deliberately outside the spec (e.g. /health) before the validator.
+	RejectUnknownRoutes bool
+	// ErrorWriter writes the 400/404 responses. Optional (default
+	// httpx.WriteError).
 	ErrorWriter httpx.ErrorWriter
 }
+
+// CodeNotFound is the error code for a request matching no route in the
+// spec when Options.RejectUnknownRoutes is set.
+const CodeNotFound = "NOT_FOUND"
 
 // Load parses and validates spec.
 func Load(spec []byte) (*openapi3.T, error) {
@@ -46,14 +56,18 @@ func Load(spec []byte) (*openapi3.T, error) {
 	return doc, nil
 }
 
-// Lint loads and validates spec and returns a one-line summary, for a CI
-// `speccheck`-style command:
+// Lint loads and validates spec, checks that every path can be routed the
+// way Validator routes requests at runtime, and returns a one-line summary,
+// for a CI `speccheck`-style command:
 //
 //	summary, err := oapi.Lint(apispec.OpenAPI)
 func Lint(spec []byte) (string, error) {
 	doc, err := Load(spec)
 	if err != nil {
 		return "", err
+	}
+	if _, err := gorillamux.NewRouter(doc); err != nil {
+		return "", fmt.Errorf("openapi: router: %w", err)
 	}
 	schemas := 0
 	if doc.Components != nil {
@@ -64,7 +78,8 @@ func Lint(spec []byte) (string, error) {
 
 // Validator returns middleware that validates every request matching a route
 // in spec before it reaches a handler. Requests for routes not in the spec
-// (e.g. /health) pass through untouched. Spec-level security requirements are
+// (e.g. /health) pass through untouched, unless Options.RejectUnknownRoutes
+// is set. Spec-level security requirements are
 // ignored: authentication is the auth middleware's job.
 func Validator(spec []byte, opts Options) (func(http.Handler) http.Handler, error) {
 	doc, err := Load(spec)
@@ -81,6 +96,10 @@ func Validator(spec []byte, opts Options) (func(http.Handler) http.Handler, erro
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			route, pathParams, err := router.FindRoute(r)
 			if err != nil {
+				if opts.RejectUnknownRoutes {
+					ew(w, http.StatusNotFound, CodeNotFound, "no matching route")
+					return
+				}
 				next.ServeHTTP(w, r)
 				return
 			}
