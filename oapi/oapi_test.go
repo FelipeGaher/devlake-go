@@ -27,6 +27,24 @@ paths:
                 name: {type: string, maxLength: 5}
       responses:
         "201": {description: created}
+  /api/v1/composite:
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - type: object
+                  required: [name]
+                  properties:
+                    name: {type: string}
+                - type: object
+                  required: [goals]
+                  properties:
+                    goals: {type: integer, minimum: 0}
+      responses:
+        "201": {description: created}
   /api/v1/items/{id}:
     get:
       parameters:
@@ -40,7 +58,7 @@ func TestLint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(summary, "2 paths") {
+	if !strings.Contains(summary, "3 paths") {
 		t.Errorf("summary = %q", summary)
 	}
 	if _, err := Lint([]byte("openapi: 3.0.3\ninfo: {}\npaths: {}")); err == nil {
@@ -110,5 +128,22 @@ func TestValidator_RejectUnknownRoutes(t *testing.T) {
 	}
 	if c := run("GET", "/api/v1/items/abc").Code; c != 299 {
 		t.Errorf("known route: %d, want pass-through", c)
+	}
+}
+
+func TestMessage_CompositeSchemaReportsInnerField(t *testing.T) {
+	mw, err := Validator([]byte(spec), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) }))
+	req := httptest.NewRequest("POST", "http://api.test/api/v1/composite", strings.NewReader(`{"name":"x","goals":-1}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	var body httpx.ErrorResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != 400 || !strings.Contains(body.Message, "goals") {
+		t.Errorf("got %d %q, want 400 naming the goals field", rec.Code, body.Message)
 	}
 }

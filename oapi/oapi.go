@@ -144,6 +144,15 @@ func Message(err error) string {
 	if errors.As(err, &reqErr) {
 		var schemaErr *openapi3.SchemaError
 		if errors.As(reqErr.Err, &schemaErr) {
+			// Composite schemas (allOf/anyOf/oneOf) wrap the error that
+			// actually names the failing field; report the innermost one.
+			for schemaErr.Origin != nil {
+				var inner *openapi3.SchemaError
+				if !errors.As(schemaErr.Origin, &inner) {
+					break
+				}
+				schemaErr = inner
+			}
 			field := schemaErr.SchemaField
 			if p := schemaErr.JSONPointer(); len(p) > 0 {
 				field = fmt.Sprint(p[len(p)-1]) + " " + field
