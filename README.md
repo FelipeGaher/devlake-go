@@ -14,7 +14,7 @@ go get github.com/FelipeGaher/devlake-go@latest
 | Package | What it does |
 |---|---|
 | `auth` | Verifies Keycloak access tokens: RS256 against the realm JWKS, required `iss` **and `azp`** allow-lists, 30s clock-skew leeway. Returns an `Identity` (sub, email, names, realm + client roles). `DisplayNameFallback` never leaks an email as a username. |
-| `authmw` | net/http auth middleware, generic over the app's principal type `T`. A `Resolve` callback find-or-creates the local user; a per-subject `Cache[T]` (TTL, re-resolve when the email changes, size cap, `Invalidate`) avoids a DB hit per request. `RequireRealmRole` / `RequireClientRole`. |
+| `authmw` | net/http auth middleware, generic over the app's principal type `T`. A `Resolve` callback find-or-creates the local user (and can deny with `authmw.Reject`, e.g. a 403 for a missing app role); a per-subject `Cache[T]` (TTL, re-resolve when the email changes, size cap, `Invalidate`) avoids a DB hit per request. `RequireRealmRole` / `RequireClientRole`. |
 | `httpx` | `{error, message}` JSON error body + pluggable `ErrorWriter`; JSON-tag-aware validator + plain-English `FormatValidationError`; `TrustedProxyClientIP` (`X-Forwarded-For` honoured only from configured proxy CIDRs) and the simpler `ClientIP`; `IPRateLimit` / `KeyedRateLimit`; `SecurityHeaders`; `MaxBytes`; structured `AccessLog`. |
 | `accesslog` | Fixed-schema JSON traffic log line (incoming requests and outgoing calls). |
 | `ratelimit` | In-memory per-key token buckets with idle pruning and a size cap. |

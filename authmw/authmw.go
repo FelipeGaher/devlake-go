@@ -11,6 +11,7 @@ package authmw
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -25,7 +26,12 @@ type Config[T any] struct {
 	Verifier auth.TokenVerifier
 	// Resolve maps a verified identity to the app principal, e.g. a race-safe
 	// INSERT ... ON CONFLICT find-or-create on the users table. Called only
-	// on a cache miss. Required.
+	// on a cache miss (or on every request when Cache is nil). Required.
+	//
+	// Returning an error made with Reject denies the request with that
+	// status/code/message (e.g. 403 when the identity lacks an app role, or
+	// a local account is disabled); any other error is a 500. Errors are
+	// never cached.
 	Resolve func(ctx context.Context, id auth.Identity) (T, error)
 	// Cache memoizes Resolve per subject. Optional (nil = resolve on every
 	// request). Must be a single shared instance per process: anything that
@@ -35,6 +41,24 @@ type Config[T any] struct {
 	LogUserID func(T) int64
 	// ErrorWriter writes 401/500 responses. Optional (default httpx.WriteError).
 	ErrorWriter httpx.ErrorWriter
+}
+
+// RejectError denies a request from Config.Resolve with a specific HTTP
+// status, error code and message. Create it with Reject.
+type RejectError struct {
+	Status  int
+	Code    string
+	Message string
+}
+
+func (e *RejectError) Error() string {
+	return fmt.Sprintf("authmw: rejected (%d %s): %s", e.Status, e.Code, e.Message)
+}
+
+// Reject returns an error that makes Middleware respond with status, code
+// and message (via the configured ErrorWriter) instead of a 500.
+func Reject(status int, code, message string) error {
+	return &RejectError{Status: status, Code: code, Message: message}
 }
 
 type principalKey struct{}
@@ -69,6 +93,11 @@ func Middleware[T any](cfg Config[T]) func(http.Handler) http.Handler {
 			if !cached {
 				p, err = cfg.Resolve(r.Context(), id)
 				if err != nil {
+					var rej *RejectError
+					if errors.As(err, &rej) {
+						ew(w, rej.Status, rej.Code, rej.Message)
+						return
+					}
 					if !errors.Is(err, context.Canceled) {
 						slog.ErrorContext(r.Context(), "authmw: resolve principal failed", "sub", id.Subject, "error", err)
 					}

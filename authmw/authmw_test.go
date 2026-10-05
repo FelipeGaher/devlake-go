@@ -207,3 +207,32 @@ func TestRequireRoles(t *testing.T) {
 		t.Errorf("client role on other client: %d", c)
 	}
 }
+
+func TestResolveReject(t *testing.T) {
+	calls := 0
+	v := fakeVerifier{"tok-noaccess": {Subject: "sub-n"}}
+	cache := newCache[principal]()
+	h := Middleware(Config[principal]{
+		Verifier: v,
+		Cache:    cache,
+		Resolve: func(_ context.Context, id auth.Identity) (principal, error) {
+			calls++
+			return principal{}, Reject(http.StatusForbidden, "no_access", "no app role")
+		},
+	})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) }))
+	for i := 0; i < 2; i++ {
+		rec := do(h, "Bearer tok-noaccess")
+		var body httpx.ErrorResponse
+		_ = json.Unmarshal(rec.Body.Bytes(), &body)
+		if rec.Code != 403 || body.Error != "no_access" || body.Message != "no app role" {
+			t.Fatalf("got %d %+v, want 403 no_access", rec.Code, body)
+		}
+	}
+	if calls != 2 || cache.Len() != 0 {
+		t.Errorf("rejections must not be cached: calls=%d cached=%d", calls, cache.Len())
+	}
+	var rej *RejectError
+	if err := Reject(401, "x", "y"); !errors.As(err, &rej) || rej.Status != 401 {
+		t.Errorf("Reject() = %v", err)
+	}
+}
