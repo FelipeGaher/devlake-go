@@ -69,4 +69,4 @@ for one application's client is accepted by every other application.
   ```
   go work init . /path/to/devlake-go
   ```
-- Breaking changes are fine while on `v0.x`. Once at `v1`, follow semver.
+- Semver from v1.0.0: breaking API changes only in a new major version. See [CHANGELOG.md](CHANGELOG.md).
