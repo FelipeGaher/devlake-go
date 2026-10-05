@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,11 @@ type PoolOptions struct {
 	MaxConnLifetime   time.Duration
 	MaxConnIdleTime   time.Duration
 	HealthCheckPeriod time.Duration
+	// StatementTimeout, if > 0, sets Postgres' statement_timeout on every
+	// connection the pool opens: a server-side backstop against a runaway
+	// query holding a pooled connection indefinitely. Zero leaves the server
+	// default (normally no timeout).
+	StatementTimeout time.Duration
 }
 
 // DefaultPoolOptions suits a single small service replica.
@@ -45,6 +51,9 @@ func Connect(ctx context.Context, databaseURL string, opts PoolOptions) (*pgxpoo
 	cfg.MaxConnLifetime = pick(opts.MaxConnLifetime, d.MaxConnLifetime)
 	cfg.MaxConnIdleTime = pick(opts.MaxConnIdleTime, d.MaxConnIdleTime)
 	cfg.HealthCheckPeriod = pick(opts.HealthCheckPeriod, d.HealthCheckPeriod)
+	if opts.StatementTimeout > 0 {
+		cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(opts.StatementTimeout.Milliseconds(), 10)
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

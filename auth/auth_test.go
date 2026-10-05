@@ -171,3 +171,53 @@ func TestDisplayNameFallback(t *testing.T) {
 		}
 	}
 }
+
+// A cancelled startup context must not break verification afterwards (the
+// background refresh is tied to the process, not to New's ctx).
+func TestNew_CancelledStartupContext(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.RawURLEncoding.EncodeToString
+	jwks := map[string]any{"keys": []any{map[string]any{
+		"kty": "RSA", "kid": "k1", "use": "sig", "alg": "RS256",
+		"n": b64(key.N.Bytes()), "e": b64(big.NewInt(int64(key.E)).Bytes()),
+	}}}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(jwks)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	v, err := auth.New(ctx, srv.URL, []string{issuer}, []string{"app-frontend"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	tok := sign(t, key, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": issuer, "azp": "app-frontend", "sub": "u", "exp": time.Now().Add(time.Minute).Unix(),
+	})
+	if _, err := v.Verify(context.Background(), tok); err != nil {
+		t.Fatalf("verify after startup ctx cancelled: %v", err)
+	}
+}
+
+// An unreachable JWKS at startup is not fatal; tokens are refused until a
+// fetch succeeds.
+func TestNew_UnreachableJWKSIsNotFatal(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	url := srv.URL
+	srv.Close()
+	v, err := auth.New(context.Background(), url, []string{issuer}, []string{"app-frontend"})
+	if err != nil {
+		t.Fatalf("New with unreachable JWKS: %v, want nil error", err)
+	}
+	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	tok := sign(t, key, jwt.SigningMethodRS256, jwt.MapClaims{
+		"iss": issuer, "azp": "app-frontend", "sub": "u", "exp": time.Now().Add(time.Minute).Unix(),
+	})
+	if _, err := v.Verify(context.Background(), tok); !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("verify with no keys: %v, want ErrInvalidToken", err)
+	}
+}

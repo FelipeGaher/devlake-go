@@ -13,11 +13,15 @@ import (
 	"github.com/FelipeGaher/devlake-go/ratelimit"
 )
 
-// ClientIP returns the caller's IP. Behind a reverse proxy that appends to
-// X-Forwarded-For (e.g. nginx's $proxy_add_x_forwarded_for), the rightmost
-// value is the address that connected to the proxy; leading values are client-controlled and ignored. Falls back to
-// X-Real-IP, then RemoteAddr. Only trust this when the backend is reachable
-// solely through the reverse proxy.
+// ClientIP returns the caller's IP, trusting X-Forwarded-For from any peer:
+// it takes the rightmost value, which is the address that connected to a
+// reverse proxy that appends to the header (e.g. nginx's
+// $proxy_add_x_forwarded_for); leading values are client-controlled and
+// ignored. Falls back to X-Real-IP, then RemoteAddr.
+//
+// Only safe when the backend is reachable solely through that proxy: a
+// client connecting directly can send any X-Forwarded-For it likes. Prefer
+// TrustedProxyClientIP, which only honours the header from known proxies.
 func ClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.Split(xff, ",")
@@ -52,7 +56,11 @@ func KeyedRateLimit(store *ratelimit.Store, keyFn func(*http.Request) string, ew
 	}
 }
 
-// IPRateLimit limits requests per ClientIP. Apply before authentication.
+// IPRateLimit limits requests per ClientIP. Apply before authentication. To
+// identify clients with TrustedProxyClientIP instead, use KeyedRateLimit:
+//
+//	ipOf, err := httpx.TrustedProxyClientIP(cfg.TrustedProxies)
+//	r.Use(httpx.KeyedRateLimit(ratelimit.NewStore(50, 100), ipOf, nil))
 func IPRateLimit(rps float64, burst int, ew ErrorWriter) func(http.Handler) http.Handler {
 	return KeyedRateLimit(ratelimit.NewStore(rps, burst), ClientIP, ew)
 }

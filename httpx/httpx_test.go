@@ -127,3 +127,42 @@ func TestMaxBytesAndSecurityHeaders(t *testing.T) {
 		t.Errorf("security headers missing: %v", rec.Header())
 	}
 }
+
+func TestTrustedProxyClientIP(t *testing.T) {
+	ipOf, err := TrustedProxyClientIP([]string{"127.0.0.1/32", " 10.0.0.0/8 ", "", "192.0.2.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, remote, xff, want string
+	}{
+		{"direct client: forged XFF ignored", "203.0.113.5:4000", "6.6.6.6", "203.0.113.5"},
+		{"via trusted proxy: rightmost non-proxy XFF", "127.0.0.1:5000", "6.6.6.6, 198.51.100.7", "198.51.100.7"},
+		{"via proxy chain: skips trusted hops", "127.0.0.1:5000", "198.51.100.7, 10.1.2.3", "198.51.100.7"},
+		{"bare-IP proxy entry", "192.0.2.1:80", "198.51.100.9", "198.51.100.9"},
+		{"trusted proxy, no XFF", "127.0.0.1:5000", "", "127.0.0.1"},
+		{"trusted proxy, only junk/trusted XFF", "127.0.0.1:5000", "not-an-ip, 10.0.0.1", "127.0.0.1"},
+		{"IPv4-mapped IPv6 peer is trusted", "[::ffff:127.0.0.1]:5000", "198.51.100.7", "198.51.100.7"},
+	}
+	for _, tt := range tests {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.RemoteAddr = tt.remote
+		if tt.xff != "" {
+			r.Header.Set("X-Forwarded-For", tt.xff)
+		}
+		if got := ipOf(r); got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+
+	none, _ := TrustedProxyClientIP(nil)
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "127.0.0.1:1"
+	r.Header.Set("X-Forwarded-For", "6.6.6.6")
+	if got := none(r); got != "127.0.0.1" {
+		t.Errorf("no trusted proxies: got %q, want RemoteAddr", got)
+	}
+	if _, err := TrustedProxyClientIP([]string{"10.0.0.0/33"}); err == nil {
+		t.Error("invalid CIDR: want error")
+	}
+}

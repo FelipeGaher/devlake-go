@@ -15,12 +15,12 @@ go get github.com/FelipeGaher/devlake-go@latest
 |---|---|
 | `auth` | Verifies Keycloak access tokens: RS256 against the realm JWKS, required `iss` **and `azp`** allow-lists, 30s clock-skew leeway. Returns an `Identity` (sub, email, names, realm + client roles). `DisplayNameFallback` never leaks an email as a username. |
 | `authmw` | net/http auth middleware, generic over the app's principal type `T`. A `Resolve` callback find-or-creates the local user; a per-subject `Cache[T]` (TTL, re-resolve when the email changes, size cap, `Invalidate`) avoids a DB hit per request. `RequireRealmRole` / `RequireClientRole`. |
-| `httpx` | `{error, message}` JSON error body + pluggable `ErrorWriter`; JSON-tag-aware validator + plain-English `FormatValidationError`; `ClientIP` (rightmost `X-Forwarded-For`, behind a reverse proxy); `IPRateLimit` / `KeyedRateLimit`; `SecurityHeaders`; `MaxBytes`; structured `AccessLog`. |
+| `httpx` | `{error, message}` JSON error body + pluggable `ErrorWriter`; JSON-tag-aware validator + plain-English `FormatValidationError`; `TrustedProxyClientIP` (`X-Forwarded-For` honoured only from configured proxy CIDRs) and the simpler `ClientIP`; `IPRateLimit` / `KeyedRateLimit`; `SecurityHeaders`; `MaxBytes`; structured `AccessLog`. |
 | `accesslog` | Fixed-schema JSON traffic log line (incoming requests and outgoing calls). |
 | `ratelimit` | In-memory per-key token buckets with idle pruning and a size cap. |
 | `oapi` | OpenAPI request-validation middleware (kin-openapi) + `Lint` for a CI spec check. |
 | `sqid` | Opaque Sqids encoding of int64 database ids for the API surface. |
-| `pgxutil` | pgx pool `Connect`, `DBTX`, `WithTx`, unique-violation helpers. |
+| `pgxutil` | pgx pool `Connect` (optional per-connection `statement_timeout`), `DBTX`, `WithTx`, unique-violation helpers. |
 | `webpush` | Batch Web Push send with Urgency High + 1h TTL, dead-subscription callback, access logging. |
 | `mdsafety` | Write-time validation that Markdown sticks to a safe subset (no raw HTML, https/mailto links, https images, bounded nesting). |
 | `kcadmin` | Dev-tooling Keycloak client: seed users through the Admin API, get user tokens through the password grant. |

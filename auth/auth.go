@@ -96,9 +96,19 @@ type claims struct {
 	} `json:"resource_access"`
 }
 
-// New fetches the JWKS at jwksURL (failing fast if it is unreachable) and
-// returns a verifier accepting tokens whose iss is one of issuers and whose
-// azp is one of authorizedParties. Both lists are required.
+// New returns a verifier for tokens signed by the JWKS at jwksURL, whose iss
+// is one of issuers and whose azp is one of authorizedParties. Both lists are
+// required.
+//
+// The JWKS is fetched once here and then refreshed hourly in the background
+// for the life of the process; a token signed with an unknown key id also
+// triggers an immediate (rate-limited) refresh, so key rotation is picked up
+// without a restart. An unreachable JWKS at startup is NOT an error: New
+// still succeeds, the failure is logged, and every token is rejected until a
+// later fetch succeeds — so the service can start before Keycloak does.
+//
+// ctx only scopes that first fetch; cancelling it later does not stop the
+// background refresh (a short startup timeout context is fine to pass).
 //
 // jwksURL and issuers are deliberately separate: inside Docker the backend
 // reaches Keycloak by its container hostname, while tokens carry the
@@ -112,7 +122,9 @@ func New(ctx context.Context, jwksURL string, issuers, authorizedParties []strin
 	if len(authorizedParties) == 0 {
 		return nil, errors.New("auth: at least one authorized party (azp) is required")
 	}
-	k, err := keyfunc.NewDefaultCtx(ctx, []string{jwksURL})
+	// WithoutCancel: keyfunc ends its background refresh goroutine when this
+	// context is done, and callers commonly pass a short startup timeout.
+	k, err := keyfunc.NewDefaultCtx(context.WithoutCancel(ctx), []string{jwksURL})
 	if err != nil {
 		return nil, fmt.Errorf("auth: load JWKS from %s: %w", jwksURL, err)
 	}
