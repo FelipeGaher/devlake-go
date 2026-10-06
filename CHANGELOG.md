@@ -3,6 +3,14 @@
 All notable changes to this module. Versions follow [semver](https://semver.org/):
 from v1.0.0 on, breaking API changes only happen in a new major version.
 
+## v1.1.0
+
+- `httpx.Compress(level, extraTypes...)`: gzip/deflate-encodes `application/json`
+  responses (plus any extra content types) for clients that accept it; other
+  content types (file downloads, CSV, ZIP) pass through untouched. Mount it
+  inside `AccessLog` so `bytes_sent` is the compressed size.
+  `httpx.DefaultCompressLevel` = 5.
+
 ## v1.0.0
 
 First stable release. The API is unchanged from v0.4.0; this tag commits to it.

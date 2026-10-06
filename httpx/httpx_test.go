@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -165,4 +166,68 @@ func TestTrustedProxyClientIP(t *testing.T) {
 	if _, err := TrustedProxyClientIP([]string{"10.0.0.0/33"}); err == nil {
 		t.Error("invalid CIDR: want error")
 	}
+}
+
+func TestCompress(t *testing.T) {
+	body := `{"items":[` + strings.Repeat(`{"date":"2026-10-06","done":true},`, 200) + `{}]}`
+	handler := func(contentType string) http.Handler {
+		return Compress(DefaultCompressLevel, "text/plain")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", contentType)
+			_, _ = io.WriteString(w, body)
+		}))
+	}
+	get := func(contentType, acceptEncoding string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		if acceptEncoding != "" {
+			req.Header.Set("Accept-Encoding", acceptEncoding)
+		}
+		rec := httptest.NewRecorder()
+		handler(contentType).ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("gzips JSON when accepted", func(t *testing.T) {
+		rec := get("application/json; charset=utf-8", "gzip")
+		if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+			t.Fatalf("Content-Encoding = %q, want gzip", got)
+		}
+		if rec.Body.Len() >= len(body) {
+			t.Fatalf("compressed %d bytes >= raw %d", rec.Body.Len(), len(body))
+		}
+		zr, err := gzip.NewReader(rec.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plain, err := io.ReadAll(zr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(plain) != body {
+			t.Fatal("decompressed body differs from the original")
+		}
+	})
+
+	t.Run("plain when the client doesn't accept an encoding", func(t *testing.T) {
+		rec := get("application/json", "")
+		if got := rec.Header().Get("Content-Encoding"); got != "" {
+			t.Fatalf("Content-Encoding = %q, want none", got)
+		}
+		if rec.Body.String() != body {
+			t.Fatal("body altered")
+		}
+	})
+
+	t.Run("other content types pass through", func(t *testing.T) {
+		rec := get("text/csv", "gzip")
+		if got := rec.Header().Get("Content-Encoding"); got != "" {
+			t.Fatalf("text/csv got Content-Encoding %q, want none", got)
+		}
+	})
+
+	t.Run("extra types are compressed too", func(t *testing.T) {
+		rec := get("text/plain", "gzip")
+		if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+			t.Fatalf("text/plain Content-Encoding = %q, want gzip", got)
+		}
+	})
 }
