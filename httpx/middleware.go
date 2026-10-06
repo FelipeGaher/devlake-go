@@ -76,6 +76,28 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// DefaultCompressLevel is gzip level 5: most of the size reduction of the
+// maximum level for a fraction of the CPU cost per response.
+const DefaultCompressLevel = 5
+
+// Compress gzip/deflate-encodes responses whose Content-Type is
+// application/json (plus any extraTypes, e.g. "text/plain") when the client
+// sends a matching Accept-Encoding; parameters such as "; charset=utf-8" are
+// ignored when matching. Every other content type — file downloads, CSV,
+// ZIP, images — passes through untouched, and so does any client that
+// doesn't accept an encoding.
+//
+// JSON compresses well (often 5-10x on list endpoints), which matters most
+// to mobile clients. Mount it inside AccessLog so the logged bytes_sent is
+// the compressed size:
+//
+//	r.Use(httpx.AccessLog)
+//	r.Use(httpx.Compress(httpx.DefaultCompressLevel))
+func Compress(level int, extraTypes ...string) func(http.Handler) http.Handler {
+	types := append([]string{"application/json"}, extraTypes...)
+	return chimw.Compress(level, types...)
+}
+
 // DefaultMaxBodyBytes is a sensible request body cap for a JSON API.
 const DefaultMaxBodyBytes = 1 << 20 // 1 MiB
 
