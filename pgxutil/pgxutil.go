@@ -27,6 +27,11 @@ type PoolOptions struct {
 	// query holding a pooled connection indefinitely. Zero leaves the server
 	// default (normally no timeout).
 	StatementTimeout time.Duration
+	// IdleInTxTimeout, if > 0, sets idle_in_transaction_session_timeout: a
+	// session left inside an open transaction doing nothing (a leaked or
+	// forgotten transaction) is ended instead of pinning its connection and
+	// locks indefinitely. Zero leaves the server default (normally off).
+	IdleInTxTimeout time.Duration
 }
 
 // DefaultPoolOptions suits a single small service replica.
@@ -45,15 +50,7 @@ func Connect(ctx context.Context, databaseURL string, opts PoolOptions) (*pgxpoo
 	if err != nil {
 		return nil, fmt.Errorf("pgxutil: parse db config: %w", err)
 	}
-	d := DefaultPoolOptions
-	cfg.MaxConns = pick(opts.MaxConns, d.MaxConns)
-	cfg.MinConns = pick(opts.MinConns, d.MinConns)
-	cfg.MaxConnLifetime = pick(opts.MaxConnLifetime, d.MaxConnLifetime)
-	cfg.MaxConnIdleTime = pick(opts.MaxConnIdleTime, d.MaxConnIdleTime)
-	cfg.HealthCheckPeriod = pick(opts.HealthCheckPeriod, d.HealthCheckPeriod)
-	if opts.StatementTimeout > 0 {
-		cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(opts.StatementTimeout.Milliseconds(), 10)
-	}
+	applyOptions(cfg, opts)
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -64,6 +61,23 @@ func Connect(ctx context.Context, databaseURL string, opts PoolOptions) (*pgxpoo
 		return nil, fmt.Errorf("pgxutil: ping database: %w", err)
 	}
 	return pool, nil
+}
+
+// applyOptions sets opts (zero fields from DefaultPoolOptions) on cfg.
+func applyOptions(cfg *pgxpool.Config, opts PoolOptions) {
+	d := DefaultPoolOptions
+	cfg.MaxConns = pick(opts.MaxConns, d.MaxConns)
+	cfg.MinConns = pick(opts.MinConns, d.MinConns)
+	cfg.MaxConnLifetime = pick(opts.MaxConnLifetime, d.MaxConnLifetime)
+	cfg.MaxConnIdleTime = pick(opts.MaxConnIdleTime, d.MaxConnIdleTime)
+	cfg.HealthCheckPeriod = pick(opts.HealthCheckPeriod, d.HealthCheckPeriod)
+	// Session settings sent on every new connection, in milliseconds.
+	if opts.StatementTimeout > 0 {
+		cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(opts.StatementTimeout.Milliseconds(), 10)
+	}
+	if opts.IdleInTxTimeout > 0 {
+		cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = strconv.FormatInt(opts.IdleInTxTimeout.Milliseconds(), 10)
+	}
 }
 
 func pick[T comparable](v, def T) T {
