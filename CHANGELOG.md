@@ -3,6 +3,13 @@
 All notable changes to this module. Versions follow [semver](https://semver.org/):
 from v1.0.0 on, breaking API changes only happen in a new major version.
 
+## v1.2.0
+
+- `pgxutil.PoolOptions.IdleInTxTimeout`: sets
+  `idle_in_transaction_session_timeout` on every pooled connection, so a
+  session left idle inside an open transaction is ended instead of pinning its
+  connection and locks. Zero keeps the server default.
+
 ## v1.1.0
 
 - `httpx.Compress(level, extraTypes...)`: gzip/deflate-encodes `application/json`
